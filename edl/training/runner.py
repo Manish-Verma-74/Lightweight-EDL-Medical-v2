@@ -73,8 +73,49 @@ def execute_run(spec: RunSpec, ctx: RunContext) -> dict:
     try:
         result = train_run(spec, ctx.cfg, ctx.manifest, ctx.paths, work_dir, drive_dir, identity, ctx.device,
                            ctx.max_epochs, ctx.allow_commit_change, ctx.sync_fail_hook, ctx.log)
-        summary = {k: v for k, v in result.items() if k not in ("history", "best_path", "latest_path")}
-        summary.update({"identity": identity, "env": env, "test_evaluation_deferred": True})
+        
+        # Find the validation metrics from the exact epoch selected by Macro-F1.
+        history = result.get("history", [])
+        best_epoch = int(result["best_epoch"])
+
+        best_row = next(
+            (
+                row
+                for row in history
+                if int(row.get("epoch", -1)) == best_epoch
+            ),
+            None,
+        )
+
+        # Fail explicitly if the selected epoch's metrics are unavailable.
+        if best_row is None:
+            raise RuntimeError(
+                f"{spec.run_id}: no history row for best epoch {best_epoch}"
+            )
+
+        required_metrics = ("val_accuracy", "val_ece")
+        missing_metrics = [
+            metric for metric in required_metrics
+            if metric not in best_row
+        ]
+        if missing_metrics:
+            raise RuntimeError(
+                f"{spec.run_id}: missing best-epoch metrics: {missing_metrics}"
+            )
+
+        summary = {
+            k: v
+            for k, v in result.items()
+            if k not in ("history", "best_path", "latest_path")
+        }
+        summary.update({
+            "best_val_accuracy": float(best_row["val_accuracy"]),
+            "best_val_ece": float(best_row["val_ece"]),
+            "identity": identity,
+            "env": env,
+            "test_evaluation_deferred": True,
+        })
+
         write_json_atomic(summary, os.path.join(work_dir, "summary.json"))
         _persist_small(work_dir, drive_dir, ["summary.json", "env.json", "epochs.csv"])
         state = "completed" if result["stop_reason"] == "early_stop" else "cap_limited"

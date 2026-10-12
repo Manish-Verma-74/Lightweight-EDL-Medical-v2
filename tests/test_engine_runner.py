@@ -1,6 +1,6 @@
 """End-to-end tests on a tiny synthetic dataset (CPU, a few seconds each)."""
 import os
-
+import csv
 import pytest
 
 torch = pytest.importorskip("torch")
@@ -89,6 +89,35 @@ def test_execute_run_cap_limited_then_skipped_without_test_leakage(synthetic_ham
     st = execute_run(spec, make_ctx(manifest, paths, tiny_cfg, tmp_path))
     assert st["state"] == "cap_limited" and not (d / "predictions_id.npz").exists()
     assert not (d / "test_metrics.json").exists()
+
+    # Verify summary metrics match the epoch selected by validation Macro-F1.
+    summary_path = d / "summary.json"
+    assert summary_path.exists(), "summary.json was not generated"
+
+    with summary_path.open("r", encoding="utf-8") as f:
+        summary = json.load(f)
+
+    with (d / "epochs.csv").open(
+        "r", newline="", encoding="utf-8"
+    ) as f:
+        rows = list(csv.DictReader(f))
+
+    best_epoch = int(summary["best_epoch"])
+
+    best_row = next(
+        (row for row in rows if int(row["epoch"]) == best_epoch),
+        None,
+    )
+    assert best_row is not None, (
+        f"No epochs.csv row found for best epoch {best_epoch}"
+    )
+
+    assert float(summary["best_val_accuracy"]) == pytest.approx(
+        float(best_row["val_accuracy"])
+    )
+    assert float(summary["best_val_ece"]) == pytest.approx(
+        float(best_row["val_ece"])
+    )
 
     st = execute_run(spec, make_ctx(manifest, paths, tiny_cfg, tmp_path))  # same cap: no rerun
     assert st["state"] == "cap_limited"
