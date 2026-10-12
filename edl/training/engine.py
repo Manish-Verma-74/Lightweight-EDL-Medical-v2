@@ -12,10 +12,14 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from edl.constants import NUM_CLASSES
+from edl.constants import CLASS_NAMES, NUM_CLASSES
 from edl.data.ham10000 import (build_eval_transform, build_train_transform, class_weights_sampler,
                                make_dataset, make_loader)
-from edl.evaluation.metrics import ece, macro_f1
+from edl.evaluation.metrics import (
+    aurc,
+    classification_summary,
+    macro_cwece,
+)
 from edl.evaluation.predict import predict_arrays
 from edl.frameworks import build_framework
 from edl.models.model import LightweightModel
@@ -104,12 +108,49 @@ def train_one_epoch(model, framework, loader, optimizer, device, epoch, augmenta
     return totals.get("loss", 0.0) / den, diag
 
 
-def evaluate_split(model, framework, loader, device, non_blocking=True) -> dict:
-    arrays = predict_arrays(model, framework, loader, device, non_blocking)
-    pred = arrays["probs"].argmax(1)
-    arrays["macro_f1"] = macro_f1(arrays["labels"], pred, NUM_CLASSES)
-    arrays["accuracy"] = float((pred == arrays["labels"]).mean())
-    arrays["ece"] = ece(arrays["probs"], arrays["labels"])
+def evaluate_split(
+    model,
+    framework,
+    loader,
+    device,
+    non_blocking=True,
+    ece_bins=15,
+    cw_ece_bins=15,
+) -> dict:
+    """Evaluate classification, calibration and selective-prediction metrics."""
+    arrays = predict_arrays(
+        model, framework, loader, device, non_blocking
+    )
+    probs = arrays["probs"]
+    labels = arrays["labels"]
+
+    # Accuracy, Macro-F1, ECE, Brier, class-wise recall and support.
+    metrics = classification_summary(
+        probs,
+        labels,
+        n_bins=ece_bins,
+    )
+
+    # Use the separately configured bin count for class-wise calibration.
+    metrics["macro_cwece"] = macro_cwece(
+        probs,
+        labels,
+        n_bins=cw_ece_bins,
+    )
+
+    # Errors are evaluated on the ordinary, unaugmented validation images.
+    errors = (probs.argmax(axis=1) != labels).astype(float)
+    for name, key in (
+        ("native", "native_uncertainty"),
+        ("msp", "msp_uncertainty"),
+        ("entropy", "entropy"),
+    ):
+        metrics[f"aurc_{name}"] = aurc(
+            errors,
+            arrays[key],
+        )
+
+    arrays.update(metrics)
     return arrays
 
 
@@ -195,27 +236,97 @@ def train_run(spec: RunSpec, cfg: dict, manifest, paths: dict, work_dir: str, dr
         e0 = time.time()
         train_loss, train_diag = train_one_epoch(model, framework, train_loader, optimizer, device, epoch,
                                                  spec.augmentation, aug_cfg, aug_rng, non_blocking)
-        val = evaluate_split(model, framework, val_loader, device, non_blocking)
+        val = evaluate_split(
+            model,
+            framework,
+            val_loader,
+            device,
+            non_blocking=non_blocking,
+            ece_bins=cfg["evaluation"]["ece_bins"],
+            cw_ece_bins=cfg["evaluation"]["cw_ece_bins"],
+        )
         improved = val["macro_f1"] > best_f1          # strict: the earliest epoch wins ties
         if improved:
             best_f1, best_epoch, no_improve = val["macro_f1"], epoch, 0
             best_model_state = cpu_state_dict(model.state_dict())
-            best_extra = {"val_accuracy": val["accuracy"]}
+            best_extra = {
+                "val_accuracy": float(val["accuracy"]),
+                "val_macro_f1": float(val["macro_f1"]),
+                "val_ece": float(val["ece"]),
+                "val_macro_cwece": float(val["macro_cwece"]),
+                "val_brier": float(val["brier"]),
+                "val_aurc_native": float(val["aurc_native"]),
+                "val_aurc_msp": float(val["aurc_msp"]),
+                "val_aurc_entropy": float(val["aurc_entropy"]),
+                "val_per_class_recall": [
+                    float(x) if np.isfinite(x) else None
+                    for x in val["per_class_recall"]
+                ],
+                "val_support": [int(x) for x in val["support"]],
+            }
             ckpt.save_best(best_model_state, epoch, best_f1, best_extra)
         else:
             no_improve += 1
-        history.append({"epoch": epoch, "train_loss": round(train_loss, 6), "val_macro_f1": round(val["macro_f1"], 6),
-                        "val_accuracy": round(val["accuracy"], 6), "val_ece": round(val["ece"], 6),
-                        **{k: round(float(v), 8) if isinstance(v, (float, int)) else v for k, v in train_diag.items()},
-                        "best_epoch": best_epoch, "no_improve": no_improve, "seconds": round(time.time() - e0, 1)})
+
+        history_row = {
+            "epoch": epoch,
+            "train_loss": round(train_loss, 6),
+            "val_accuracy": round(val["accuracy"], 6),
+            "val_macro_f1": round(val["macro_f1"], 6),
+            "val_ece": round(val["ece"], 6),
+            "val_macro_cwece": round(val["macro_cwece"], 6),
+            "val_brier": round(val["brier"], 6),
+            "val_aurc_native": round(val["aurc_native"], 6),
+            "val_aurc_msp": round(val["aurc_msp"], 6),
+            "val_aurc_entropy": round(val["aurc_entropy"], 6),
+            **{
+                k: round(float(v), 8) if isinstance(v, (float, int)) else v
+                for k, v in train_diag.items()
+            },
+            "best_epoch": best_epoch,
+            "no_improve": no_improve,
+            "seconds": round(time.time() - e0, 1),
+        }
+
+        # Store per-class metrics as individual CSV columns.
+        for i, class_name in enumerate(CLASS_NAMES):
+            recall = float(val["per_class_recall"][i])
+            history_row[f"val_recall_{class_name}"] = (
+                round(recall, 6) if np.isfinite(recall) else None
+            )
+            history_row[f"val_support_{class_name}"] = int(
+                val["support"][i]
+            )
+
+        history.append(history_row)
+
         if no_improve >= t_cfg["patience"]:
             stop_reason = "early_stop"
         elif epoch >= max_epochs:
             stop_reason = "cap"
-        ckpt.save_latest(snapshot(), epoch, force=stop_reason is not None)
+
+        ckpt.save_latest(
+            snapshot(),
+            epoch,
+            force=stop_reason is not None,
+        )
         _write_history(os.path.join(work_dir, "epochs.csv"), history)
-        log(f"[{spec.run_id}] epoch {epoch}: loss {train_loss:.4f} | val F1 {val['macro_f1']:.4f} | "
-            f"best {best_f1:.4f}@{best_epoch} | {history[-1]['seconds']}s")
+
+        best_row = next(
+            row for row in history
+            if int(row["epoch"]) == best_epoch
+        )
+        log(
+            f"[{spec.run_id}] epoch {epoch}: "
+            f"loss {train_loss:.4f} | "
+            f"val Acc {val['accuracy']:.4f} | "
+            f"val F1 {val['macro_f1']:.4f} | "
+            f"val ECE {val['ece']:.4f} | "
+            f"best F1 {best_f1:.4f}@{best_epoch} "
+            f"(Acc {float(best_row['val_accuracy']):.4f}, "
+            f"ECE {float(best_row['val_ece']):.4f}) | "
+            f"{history_row['seconds']}s"
+        )
 
     ckpt.finalize(epoch)
     _write_history(os.path.join(work_dir, "epochs.csv"), history)

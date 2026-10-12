@@ -17,9 +17,29 @@ class RunnerError(RuntimeError):
 
 
 MANIFEST_COLUMNS = ["run_id", "backbone", "framework", "augmentation", "seed"]
-WORKER_LOG_FIELDS = ["run_id", "backbone", "framework", "augmentation", "seed", "state", "stop_reason",
-                     "last_epoch", "best_epoch", "best_val_macro_f1", "seconds_this_session", "gpu_model",
-                     "code_commit", "finished_at"]
+WORKER_LOG_FIELDS = [
+    "run_id",
+    "backbone",
+    "framework",
+    "augmentation",
+    "seed",
+    "state",
+    "stop_reason",
+    "last_epoch",
+    "best_epoch",
+    "best_val_macro_f1",
+    "best_val_accuracy",
+    "best_val_ece",
+    "best_val_macro_cwece",
+    "best_val_brier",
+    "best_val_aurc_native",
+    "best_val_aurc_msp",
+    "best_val_aurc_entropy",
+    "seconds_this_session",
+    "gpu_model",
+    "code_commit",
+    "finished_at",
+]
 
 
 # ----------------------------------------------------------------------------- manifest

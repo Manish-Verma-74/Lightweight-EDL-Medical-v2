@@ -95,10 +95,35 @@ def main():
     print(f"phase={args.phase} | runs={len(runs)} | max_epochs={max_epochs} | device={device} | commit={commit[:8]}")
     states = []
     for r in runs.itertuples():
-        spec = RunSpec(r.run_id, r.backbone, r.framework, r.augmentation, int(r.seed))
+        spec = RunSpec(
+            r.run_id,
+            r.backbone,
+            r.framework,
+            r.augmentation,
+            int(r.seed),
+        )
         st = execute_run(spec, ctx)
-        states.append((r.run_id, st.get("state"), st.get("stop_reason"), st.get("best_epoch"), st.get("best_val_macro_f1")))
-    print("\nrun_id | state | stop_reason | best_epoch | best_val_macro_f1")
+        states.append((
+            r.run_id,
+            st.get("state"),
+            st.get("stop_reason"),
+            st.get("best_epoch"),
+            st.get("best_val_accuracy"),
+            st.get("best_val_macro_f1"),
+            st.get("best_val_ece"),
+            st.get("best_val_macro_cwece"),
+            st.get("best_val_brier"),
+            st.get("best_val_aurc_native"),
+            st.get("best_val_aurc_msp"),
+            st.get("best_val_aurc_entropy"),
+        ))
+    print(
+        "\nrun_id | state | stop_reason | best_epoch | "
+        "best_val_accuracy | best_val_macro_f1 | best_val_ece | "
+        "best_val_macro_cwece | best_val_brier | "
+        "best_val_aurc_native | best_val_aurc_msp | "
+        "best_val_aurc_entropy"
+    )
     for row in states:
         print(" | ".join(str(v) for v in row))
 

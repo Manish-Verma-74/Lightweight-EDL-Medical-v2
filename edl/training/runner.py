@@ -12,7 +12,7 @@ from edl.training.engine import RunSpec, train_run
 from edl.training.manifest import RunStatus, append_worker_log
 from edl.utils.env import collect_env, training_source_fingerprint
 from edl.utils.io import write_json_atomic
-
+from edl.constants import CLASS_NAMES
 
 @dataclass
 class RunContext:
@@ -93,14 +93,34 @@ def execute_run(spec: RunSpec, ctx: RunContext) -> dict:
                 f"{spec.run_id}: no history row for best epoch {best_epoch}"
             )
 
-        required_metrics = ("val_accuracy", "val_ece")
+        required_metrics = (
+            "val_accuracy",
+            "val_macro_f1",
+            "val_ece",
+            "val_macro_cwece",
+            "val_brier",
+            "val_aurc_native",
+            "val_aurc_msp",
+            "val_aurc_entropy",
+        )
         missing_metrics = [
-            metric for metric in required_metrics
-            if metric not in best_row
+            key for key in required_metrics
+            if key not in best_row
         ]
+        missing_metrics.extend(
+            f"val_recall_{name}"
+            for name in CLASS_NAMES
+            if f"val_recall_{name}" not in best_row
+        )
+        missing_metrics.extend(
+            f"val_support_{name}"
+            for name in CLASS_NAMES
+            if f"val_support_{name}" not in best_row
+        )
         if missing_metrics:
             raise RuntimeError(
-                f"{spec.run_id}: missing best-epoch metrics: {missing_metrics}"
+                f"{spec.run_id}: missing best-epoch metrics: "
+                f"{missing_metrics}"
             )
 
         summary = {
@@ -110,7 +130,27 @@ def execute_run(spec: RunSpec, ctx: RunContext) -> dict:
         }
         summary.update({
             "best_val_accuracy": float(best_row["val_accuracy"]),
+            "best_val_macro_f1": float(best_row["val_macro_f1"]),
             "best_val_ece": float(best_row["val_ece"]),
+            "best_val_macro_cwece": float(best_row["val_macro_cwece"]),
+            "best_val_brier": float(best_row["val_brier"]),
+            "best_val_aurc": {
+                "native": float(best_row["val_aurc_native"]),
+                "msp": float(best_row["val_aurc_msp"]),
+                "entropy": float(best_row["val_aurc_entropy"]),
+            },
+            "best_val_per_class_recall": {
+                name: (
+                    float(best_row[f"val_recall_{name}"])
+                    if best_row[f"val_recall_{name}"] not in (None, "")
+                    else None
+                )
+                for name in CLASS_NAMES
+            },
+            "best_val_support": {
+                name: int(best_row[f"val_support_{name}"])
+                for name in CLASS_NAMES
+            },
             "identity": identity,
             "env": env,
             "test_evaluation_deferred": True,
@@ -122,9 +162,25 @@ def execute_run(spec: RunSpec, ctx: RunContext) -> dict:
         ceiling = ctx.cfg["training"].get("absolute_epoch_ceiling")
         at_ceiling = bool(ctx.phase == "primary" and state == "cap_limited" and ceiling is not None
                           and int(ctx.max_epochs) == int(ceiling) and int(result["last_epoch"]) >= int(ceiling))
-        st = status.update(state=state, last_epoch=result["last_epoch"], best_epoch=result["best_epoch"],
-                           best_val_macro_f1=result["best_val_macro_f1"], stop_reason=result["stop_reason"],
-                           cap_limited_at_resource_ceiling=at_ceiling, test_exported=False, error=None)
+        st = status.update(
+            state=state,
+            last_epoch=result["last_epoch"],
+            best_epoch=result["best_epoch"],
+            best_val_macro_f1=summary["best_val_macro_f1"],
+            best_val_accuracy=summary["best_val_accuracy"],
+            best_val_ece=summary["best_val_ece"],
+            best_val_macro_cwece=summary["best_val_macro_cwece"],
+            best_val_brier=summary["best_val_brier"],
+            best_val_aurc_native=summary["best_val_aurc"]["native"],
+            best_val_aurc_msp=summary["best_val_aurc"]["msp"],
+            best_val_aurc_entropy=summary["best_val_aurc"]["entropy"],
+            best_val_per_class_recall=summary["best_val_per_class_recall"],
+            best_val_support=summary["best_val_support"],
+            stop_reason=result["stop_reason"],
+            cap_limited_at_resource_ceiling=at_ceiling,
+            test_exported=False,
+            error=None,
+        )
     except KeyboardInterrupt:
         status.update(state="running", note="interrupted; resume by running again")
         raise
@@ -138,10 +194,26 @@ def execute_run(spec: RunSpec, ctx: RunContext) -> dict:
         return st
 
     if ctx.worker_log:
-        append_worker_log(ctx.worker_log, {**spec.__dict__, "state": st["state"], "stop_reason": st.get("stop_reason"),
-                                           "last_epoch": st.get("last_epoch"), "best_epoch": st.get("best_epoch"),
-                                           "best_val_macro_f1": st.get("best_val_macro_f1"),
-                                           "seconds_this_session": result["seconds_this_session"],
-                                           "gpu_model": env.get("gpu_model"), "code_commit": ctx.code_commit,
-                                           "finished_at": st["updated_at"]})
+        append_worker_log(
+            ctx.worker_log,
+            {
+                **spec.__dict__,
+                "state": st["state"],
+                "stop_reason": st.get("stop_reason"),
+                "last_epoch": st.get("last_epoch"),
+                "best_epoch": st.get("best_epoch"),
+                "best_val_macro_f1": st.get("best_val_macro_f1"),
+                "best_val_accuracy": st.get("best_val_accuracy"),
+                "best_val_ece": st.get("best_val_ece"),
+                "best_val_macro_cwece": st.get("best_val_macro_cwece"),
+                "best_val_brier": st.get("best_val_brier"),
+                "best_val_aurc_native": st.get("best_val_aurc_native"),
+                "best_val_aurc_msp": st.get("best_val_aurc_msp"),
+                "best_val_aurc_entropy": st.get("best_val_aurc_entropy"),
+                "seconds_this_session": result["seconds_this_session"],
+                "gpu_model": env.get("gpu_model"),
+                "code_commit": ctx.code_commit,
+                "finished_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            },
+        )
     return st
