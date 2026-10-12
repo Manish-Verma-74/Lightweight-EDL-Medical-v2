@@ -2,6 +2,7 @@
 import os
 import csv
 import pytest
+import json
 
 torch = pytest.importorskip("torch")
 pytest.importorskip("torchvision")
