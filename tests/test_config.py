@@ -11,11 +11,16 @@ def test_primary_config_is_valid(cfg):
 
 
 def test_unresolved_fields_are_reported_and_block_the_primary_study(cfg):
-    left = placeholders(cfg)
+    unready = copy.deepcopy(cfg)
+    unready["data"]["split"]["sha256"] = "TO_FILL_AFTER_SPLIT"
+    unready["ood"]["pad_ufes_20"]["sha256"] = "TO_FILL_AFTER_OOD"
+    unready["corruption"]["sha256"] = "TO_FILL_AFTER_CORRUPTION"
+
+    left = placeholders(unready)
     assert "data.split.sha256" in left and "design.run_manifest_sha256" not in left
     assert "ood.pad_ufes_20.sha256" in left and "corruption.sha256" in left
     with pytest.raises(ConfigError):
-        require_frozen(cfg)
+        require_frozen(unready)
 
 
 def test_changed_design_is_rejected(cfg):
