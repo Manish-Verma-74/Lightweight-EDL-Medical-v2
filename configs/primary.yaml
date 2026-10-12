@@ -1,7 +1,7 @@
 # Primary experiment configuration. Every value here is part of the protocol.
 # Fields marked TO_FILL are closed at the protocol freeze (see protocol/protocol_v1.md).
 protocol_version: v1
-status: "DRAFT - not frozen; unresolved fields are not frozen decisions"
+status: "FROZEN"
 
 study:
   title: "Calibration Robustness of Lightweight Evidential Deep Learning under Data Augmentation and Progressive Image Degradation in Medical Image Classification"
@@ -91,9 +91,9 @@ training:
   selection_metric: val_macro_f1
   tie_break: earliest_epoch
   patience: 8
-  max_epochs: null              # E_max = max(pilot best epochs) + 8 + 15, set after the convergence pilot
+  max_epochs: 57              # E_max = max(pilot best epochs) + 8 + 15, set after the convergence pilot
   epoch_extension_step: 20
-  absolute_epoch_ceiling: null  # chosen before primary training
+  absolute_epoch_ceiling: 100  # chosen before primary training
 
 data_loader:
   num_workers: 2
@@ -184,7 +184,7 @@ pilot:
   initial_ceiling: 100
   extension_step: 20
   safety_margin: 15            # E_max = max(best epochs) + patience + margin
-  resource_ceiling: null       # absolute ceiling, chosen before primary training
+  resource_ceiling: 100      # absolute ceiling, chosen before primary training
   configs:
     - {backbone: efficientnet_b0,     framework: softmax, augmentation: base_flips}
     - {backbone: efficientnet_b0,     framework: softmax, augmentation: randaugment}
