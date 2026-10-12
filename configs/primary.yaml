@@ -23,7 +23,7 @@ data:
   kaggle_dataset: kmader/skin-cancer-mnist-ham10000
   split:
     manifest: protocol/split_manifest_v1.csv
-    sha256: TO_FILL_AFTER_SPLIT_GENERATION
+    sha256: df7be4c42d83eb678a3eceef6772cd752a7654086787351ebef0552344ce894c
     generator:
       class: StratifiedGroupKFold
       n_splits: 7
@@ -124,13 +124,13 @@ ood:
   pad_ufes_20:
     source: "Mendeley Data v1 (original release)"
     manifest: protocol/ood_pad_ufes20_manifest.csv
-    sha256: TO_FILL_AFTER_MANIFEST_GENERATION
+    sha256: 502782520af85d54abfe9a9d87c3c7666e33ee9b0f39153016549d14e44eafd3
     description: "domain/acquisition shift with overlapping diagnostic classes, not pure semantic OOD"
     cluster_column: patient_id
   cifar100:
     split: official_test
     manifest: protocol/ood_cifar100_manifest.csv
-    sha256: TO_FILL_AFTER_MANIFEST_GENERATION
+    sha256: 2f57539b242c50f182903d06c6ce8b22c278d76d95d2d8a8f524de2862fa9fa1
     resize: [224, 224]
     interpolation: bilinear
     limitation: "upsampled 32x32 images are blurry; far-OOD detection may be artificially easy"
@@ -139,7 +139,7 @@ corruption:
   pipeline: "load -> RGB -> resize 224x224 -> float [0,1] -> corrupt -> clip [0,1] -> ImageNet normalize"
   global_seed: 20261009
   manifest: protocol/corruption_manifest.csv
-  sha256: TO_FILL_AFTER_MANIFEST_GENERATION
+  sha256: 19aa345452c8d889292a35ece254865bbf69c45115afad95fba5484ab424f217  
   # Severity values are PROPOSED (ImageNet-C-inspired); inspect the example grid, then freeze.
   types:
     gaussian_noise:  {param: sigma,  severities: [0.08, 0.12, 0.18, 0.26, 0.38]}
