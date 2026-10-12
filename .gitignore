@@ -1,0 +1,22 @@
+# data, checkpoints and generated outputs never go into Git
+data/
+checkpoints/
+results/
+runs/
+work/
+*.pt
+*.pth
+*.npz
+*.zip
+
+# python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+
+# secrets
+.env
+*.key
+kaggle.json

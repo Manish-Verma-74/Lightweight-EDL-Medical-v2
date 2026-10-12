@@ -1,0 +1,6 @@
+* text=auto
+# keep protocol files byte-stable across Windows and Linux so their SHA-256 hashes do not change
+*.csv text eol=lf
+*.yaml text eol=lf
+*.md text eol=lf
+*.py text eol=lf

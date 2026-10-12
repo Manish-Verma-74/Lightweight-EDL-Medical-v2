@@ -1,0 +1,193 @@
+# Primary experiment configuration. Every value here is part of the protocol.
+# Fields marked TO_FILL are closed at the protocol freeze (see protocol/protocol_v1.md).
+protocol_version: v1
+status: "DRAFT - not frozen; unresolved fields are not frozen decisions"
+
+study:
+  title: "Calibration Robustness of Lightweight Evidential Deep Learning under Data Augmentation and Progressive Image Degradation in Medical Image Classification"
+  type: "empirical comparison; no new-method claim"
+
+design:
+  backbones: [efficientnet_b0, mobilenet_v3_small, shufflenet_v2]
+  frameworks: [softmax, edl, r_edl, f_edl]
+  augmentations: [base_flips, mixup, cutmix, randaugment]
+  seeds: [42, 123, 2024]
+  total_runs: 144
+  run_manifest: protocol/run_manifest_v1.csv
+  run_manifest_sha256: 36bc2026ffdbabe82a702b39f8c38f43f4b8bce42455603408ed211b678a1c6c
+  run_id_pattern: "{backbone}__{framework}__{augmentation}__seed{seed}"
+
+data:
+  dataset: ham10000
+  classes: [akiec, bcc, bkl, df, mel, nv, vasc]
+  kaggle_dataset: kmader/skin-cancer-mnist-ham10000
+  split:
+    manifest: protocol/split_manifest_v1.csv
+    sha256: TO_FILL_AFTER_SPLIT_GENERATION
+    generator:
+      class: StratifiedGroupKFold
+      n_splits: 7
+      shuffle: true
+      random_state: 42
+      group_column: lesion_id
+      label_column: dx
+      sklearn_version: "1.6.1"
+    roles: {train_folds: [0, 1, 2, 5, 6], validation_fold: 4, test_fold: 3}
+    # Regression expectations from an earlier verified generation with the same settings.
+    # A mismatch is reported and investigated; it never forces the manifest.
+    regression_expectations:
+      images: 10015
+      lesions: 7470
+      counts: {train: 7179, val: 1400, test: 1436}
+      reference_sha256: df7be4c42d83eb678a3eceef6772cd752a7654086787351ebef0552344ce894c
+  preprocessing:
+    input_size: 224
+    resize: direct            # no padding or cropping; aspect ratio is distorted (documented limitation)
+    interpolation: bilinear
+    normalize: imagenet
+    color: rgb
+
+models:
+  num_classes: 7
+  pretrained: true
+  weights:
+    efficientnet_b0: EfficientNet_B0_Weights.IMAGENET1K_V1
+    mobilenet_v3_small: MobileNet_V3_Small_Weights.IMAGENET1K_V1
+    shufflenet_v2: ShuffleNet_V2_X1_0_Weights.IMAGENET1K_V1
+
+frameworks:
+  softmax:
+    loss: soft_target_cross_entropy
+  edl:
+    evidence: relu
+    kl_annealing_step: 10
+    epoch_indexing: one_based     # coefficient = min(1, epoch / step); 0.1 in epoch 1
+    soft_target_kl: "alpha_tilde = alpha*(1-t) + t"
+  r_edl:
+    lambda: 0.1
+    evidence: relu
+    kl_annealing_step: 10
+    epoch_indexing: one_based
+    soft_target_kl: "alpha_tilde = alpha*(1-t) + t"
+    objective_status: "controlled adaptation; verified against the official R-EDL objective before freeze"
+  f_edl:
+    spectral_norm: false
+    objective_status: "controlled variant without spectral normalization; verified equations against the F-EDL paper before freeze"
+
+augmentation:
+  base_flips: {horizontal_flip_p: 0.5, vertical_flip_p: 0.5}
+  mixup: {alpha: 0.2}
+  cutmix: {alpha: 1.0}
+  randaugment: {num_ops: 2, magnitude: 9}
+
+training:
+  optimizer: adamw
+  learning_rate: 0.0001
+  weight_decay: 0.01
+  batch_size: 32
+  scheduler: none
+  precision: fp32
+  sampler: weighted_random_train_only
+  selection_metric: val_macro_f1
+  tie_break: earliest_epoch
+  patience: 8
+  max_epochs: null              # E_max = max(pilot best epochs) + 8 + 15, set after the convergence pilot
+  epoch_extension_step: 20
+  absolute_epoch_ceiling: null  # chosen before primary training
+
+data_loader:
+  num_workers: 2
+  pin_memory: true
+  persistent_workers: false
+  non_blocking_transfer: true
+  data_location: "local Colab disk (/content/data); never read images from mounted Drive"
+
+checkpoint:
+  roles: [best_checkpoint.pth, latest_resumable.pth]
+  sync_every_n_epochs: 1        # frozen after measuring Drive transfer time in the smoke test
+  max_sync_retries: 3
+  retry_backoff_seconds: 2.0
+
+evaluation:
+  ece_bins: 15
+  cw_ece_bins: 15
+  entropy_log_base: natural
+  ood_positive_class: ood
+  fpr_recall_target: 0.95
+  melanoma:
+    specificity_targets: [0.90, 0.95]
+    coverage_targets: [0.80, 0.90]
+    thresholds_from: validation_only
+
+ood:
+  id_reference: ham10000_test
+  pad_ufes_20:
+    source: "Mendeley Data v1 (original release)"
+    manifest: protocol/ood_pad_ufes20_manifest.csv
+    sha256: TO_FILL_AFTER_MANIFEST_GENERATION
+    description: "domain/acquisition shift with overlapping diagnostic classes, not pure semantic OOD"
+    cluster_column: patient_id
+  cifar100:
+    split: official_test
+    manifest: protocol/ood_cifar100_manifest.csv
+    sha256: TO_FILL_AFTER_MANIFEST_GENERATION
+    resize: [224, 224]
+    interpolation: bilinear
+    limitation: "upsampled 32x32 images are blurry; far-OOD detection may be artificially easy"
+
+corruption:
+  pipeline: "load -> RGB -> resize 224x224 -> float [0,1] -> corrupt -> clip [0,1] -> ImageNet normalize"
+  global_seed: 20261009
+  manifest: protocol/corruption_manifest.csv
+  sha256: TO_FILL_AFTER_MANIFEST_GENERATION
+  # Severity values are PROPOSED (ImageNet-C-inspired); inspect the example grid, then freeze.
+  types:
+    gaussian_noise:  {param: sigma,  severities: [0.08, 0.12, 0.18, 0.26, 0.38]}
+    gaussian_blur:   {param: sigma,  severities: [1.0, 2.0, 3.0, 4.0, 6.0]}
+    brightness:      {param: shift,  severities: [0.1, 0.2, 0.3, 0.4, 0.5]}
+    contrast:        {param: factor, severities: [0.4, 0.3, 0.2, 0.1, 0.05]}
+  subset:
+    backbones: [efficientnet_b0, mobilenet_v3_small]
+    frameworks: [softmax, f_edl]
+    augmentations: [base_flips, cutmix]
+
+efficiency:
+  gpu: "NVIDIA Tesla T4"
+  precision: fp32
+  input_shape: [1, 3, 224, 224]
+  warmup_iterations: 50
+  timed_iterations: 200
+  cpu_threads: 1
+  reference_checkpoint: "seed 42, base_flips"
+  mac_counter: "edl.evaluation.efficiency.count_macs (Conv2d and Linear layers only)"
+
+statistics:
+  bootstrap_replicates: 10000
+  curve_bootstrap_replicates: 2000  # secondary per-corruption ECE delta intervals; fixed before primary evaluation
+  bootstrap_rng_seed: 20261009
+  p1_interval_level: 0.9875      # Bonferroni, four co-primary contrasts
+  default_interval_level: 0.95
+  resampling_units: {ham10000: lesion_id, pad_ufes_20: patient_id, cifar100: image}
+  hypotheses:
+    P1_cutmix_vs_base_ece:
+      softmax: negative
+      f_edl: negative
+      edl: positive
+      r_edl: positive
+      note: "directional expectations were described in earlier project notes as informed by validation-fold pilots; disclose this provenance and do not claim fully hypothesis-naive preregistration"
+    P2_fedl_native_vs_softmax_msp_pad_ufes20_auroc: positive
+    P4_cutmix_vs_base_corruption_ece_degradation: negative
+
+pilot:
+  seed: 42
+  patience: 8
+  initial_ceiling: 100
+  extension_step: 20
+  safety_margin: 15            # E_max = max(best epochs) + patience + margin
+  resource_ceiling: null       # absolute ceiling, chosen before primary training
+  configs:
+    - {backbone: efficientnet_b0,     framework: softmax, augmentation: base_flips}
+    - {backbone: efficientnet_b0,     framework: softmax, augmentation: randaugment}
+    - {backbone: efficientnet_b0,     framework: r_edl,   augmentation: cutmix}
+    - {backbone: mobilenet_v3_small,  framework: f_edl,   augmentation: mixup}
+    - {backbone: shufflenet_v2,       framework: f_edl,   augmentation: mixup}

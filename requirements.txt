@@ -1,0 +1,10 @@
+# Non-PyTorch dependencies. Do NOT add torch/torchvision here: Colab ships a matching CUDA build and
+# reinstalling it can break the runtime. Record the versions instead (see environment/).
+numpy>=1.26
+pandas>=2.0
+scipy>=1.11
+scikit-learn==1.6.1
+pyyaml>=6.0
+Pillow>=10.0
+matplotlib>=3.7
+kaggle>=1.6
