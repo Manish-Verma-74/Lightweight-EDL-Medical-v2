@@ -1,5 +1,6 @@
 # data, checkpoints and generated outputs never go into Git
-data/
+/data/
+!edl/data/
 checkpoints/
 results/
 runs/
