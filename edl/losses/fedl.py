@@ -1,3 +1,6 @@
+# F-EDL controlled variant finalized for protocol-v1.
+# Spectral normalization is disabled; see protocol/protocol_v1.md
+# for the documented adaptation and uncertainty calculation.
 """F-EDL head and loss (Flexible Evidential Deep Learning), WITHOUT spectral normalization.
 
 Head outputs alpha = exp(g_alpha(z)) (clamped), p = softmax(g_p(z)), tau = softplus(g_tau(z)).

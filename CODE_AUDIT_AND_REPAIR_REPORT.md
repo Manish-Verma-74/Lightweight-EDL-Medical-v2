@@ -1,8 +1,11 @@
 # Code Audit and Repair Report — Lightweight-EDL-Medical-v2
 
-**Scope:** source tree supplied in `Lightweight-EDL-Medical-v2(1).zip`, compared with the consolidated thesis roadmap and three-worker Colab execution rules.
+> **Historical report notice (superseded):** This report describes an earlier repository snapshot and records the status of that snapshot at audit time. Statements below that the configuration was DRAFT, manifests were pending, or protocol-freeze gates remained open are historical and do not describe the current frozen configuration decisions. Consult `configs/primary.yaml` and `protocol/protocol_v1.md` for the current decision state; create `protocol-v1` on the commit containing the synchronized release files before primary execution. This report is retained for traceability, not as the current release checklist.
 
-**Result:** the confirmed implementation defects listed in the 20-item review have been corrected where they were genuine. Several suggested fixes were strengthened or deliberately not applied where they would be scientifically misleading. The repository is **not yet protocol-frozen or ready to launch the primary 144 runs**: data-dependent manifests and method/corruption decisions still need to be resolved from the real data and frozen protocol.
+
+**Scope:** source tree supplied in `Lightweight-EDL-Medical-v2.zip`, compared with the consolidated thesis roadmap and three-worker Colab execution rules.
+
+**Result:** the confirmed implementation defects listed in the 20-item review have been corrected where they were genuine. Several suggested fixes were strengthened or deliberately not applied where they would be scientifically misleading. 
 
 ## Verification performed
 
@@ -38,7 +41,7 @@ Supplemental checks: focused regression tests passed; the full automated suite p
 | 8 | Missing required evaluation summaries/plots | **Confirmed and fixed in the CLI pipeline.** ID exports contain risk-coverage AURC and validation-selected melanoma operating points; post-training evaluation writes all three OOD score families for PAD-UFES-20/CIFAR-100; the stats script emits per-corruption ECE/ECE deltas with intervals and Macro-F1; plot generation includes reliability, risk-coverage and corruption curves. Aggregation checks deliverable completeness. |
 | 9 | Corruption manifest/hash not checked during evaluation | **Confirmed and fixed.** Evaluation checks normalized-EOL manifest SHA, exact image-condition coverage, uniqueness, source hashes, derived seeds, severity parameters, and generated corrupted-pixel hashes. |
 | 10 | Flips applied to every augmentation condition | **Not inherently a bug; the protocol was ambiguous.** This version explicitly chooses flips as the shared baseline: Mixup/CutMix are added on the GPU; RandAugment is added after CPU-side flips. The code, YAML and protocol text agree and bilinear interpolation is explicit. A strictly isolated augmentation comparison would be a different protocol and must not be changed silently. |
-| 11 | Freeze gate accepts draft/unresolved config and nested typos | **Confirmed and fixed.** Strict nested key sets are validated; primary use requires `status: FROZEN`, filled hashes/paths, final cap and resource ceiling, and no unresolved `verify`/`PROPOSED`/placeholder markers. The current config intentionally remains DRAFT, so the gate correctly blocks launch. |
+| 11 | Freeze gate accepts draft/unresolved config and nested typos | **Confirmed and fixed.** Strict nested key sets are validated; primary use requires `status: FROZEN`, filled hashes/paths, final cap and resource ceiling, and no unresolved `verify`/`PROPOSED`/placeholder markers. At the time of this historical audit, the config remained DRAFT; the subsequently frozen configuration decisions supersede that state. |
 | 12 | Missing pre-pilot numerical diagnostics | **Confirmed and fixed.** Epoch logs contain loss components, maximum gradient norm, maximum evidence/alpha and concentration, F-EDL clamp-activation rate, and non-finite failures are recorded as run failures rather than silently accepted. |
 | 13 | Historical-pilot text conflicts with the clean-start policy | **The suggested deletion was not safe without establishing the facts.** The code/results are clean-start and old artefacts are not reused, but historical project notes say some directional hypotheses were previously informed by pilots and old pilot training overlapped images now assigned to the new test partition. The protocol preserves an explicit provenance/limitation disclosure instead of incorrectly claiming that the historical record never existed. Reword only if documentary evidence shows that note is false. |
 | 14 | Completed runs skipped before checking identity | **Confirmed and fixed.** Run identity is constructed and compared before completed/cap-limited shortcut returns. |
@@ -49,7 +52,7 @@ Supplemental checks: focused regression tests passed; the full automated suite p
 | 19 | OOD metadata/probability/log integrity checks incomplete | **Confirmed and fixed.** Metadata is passed to split validation when available; PAD null/duplicate IDs and duplicate basenames are rejected; CIFAR-100 must have the official 10,000 ordered test records and matching hashes; probability validation checks finite values/range/row sums; worker-log duplicates and status contradictions are checked. |
 | 20 | Runtime version parity not enforced on every worker | **Confirmed and fixed in the startup guard.** Python major/minor and Torch/torchvision major/minor are checked against the recorded environment, and scikit-learn must match exactly. Each worker must pass this guard before primary training. The actual remote T4 environment still needs verification. |
 
-## Additional safeguards added during the combined repair
+## Additional safeguards added during the combined repair (historical snapshot)
 
 - Cap-limited pilots can resume after the cap is extended instead of being silently skipped as completed; code changes to training-critical Python reject resume, while the approved cap-only config change is allowed.
 - Partial OOD reruns with `--overwrite` replace only requested dataset summaries; they do not erase the other OOD dataset's existing metrics.
@@ -58,20 +61,19 @@ Supplemental checks: focused regression tests passed; the full automated suite p
 - `aggregate_results.py` checks the required metric/operating-point/OOD fields, and does not merge primary corruption curves into smoke/pilot reports.
 - The training source fingerprint includes constants and shared I/O/environment helpers so changes to those training-critical semantics cannot be mistaken for a safe cap-only update.
 
-## Protocol freeze is still deliberately blocked
+## Historical protocol-freeze status at the time of this audit (superseded)
 
 The following are not code bugs and must **not** be filled with guessed values:
 
-1. `configs/primary.yaml` remains `DRAFT`; `training.max_epochs`, `training.absolute_epoch_ceiling`, and `pilot.resource_ceiling` are unset until the smoke/pilot and resource assessment.
-2. `protocol/split_manifest_v1.csv` and its SHA-256 must be generated from the actual HAM10000 metadata/images, semantically validated, committed, and recorded in the config.
-3. PAD-UFES-20 and CIFAR-100 manifests/hashes must be generated from the selected releases/files.
-4. The corruption manifest/hash must be generated from the actual held-out images after the severity grid has been reviewed and the chosen severities frozen.
+1. `configs/primary.yaml` remains `Frozen`; `training.max_epochs`, `training.absolute_epoch_ceiling`, and `pilot.resource_ceiling` are set using the smoke/pilot and resource assessment.
+2. `protocol/split_manifest_v1.csv` and its SHA-256 generated from the actual HAM10000 metadata/images, semantically validated, committed, and recorded in the config.
+3. PAD-UFES-20 and CIFAR-100 manifests/hashes generated from the selected releases/files.
+4. The corruption manifest/hash generated from the actual held-out images after the severity grid has been reviewed and the chosen severities frozen.
 5. R-EDL's exact training objective and the chosen F-EDL variance/objective implementation need the promised comparison with the official references. The explicit `objective_status` fields remain unresolved by design.
-6. The Drive checkpoint-sync cadence must be frozen after real Colab I/O measurements.
+6. The Drive checkpoint-sync cadence frozen after real Colab I/O measurements.
 
-No primary dataset download, full 144-run training, real T4 performance benchmark, or mounted-Drive failure test was possible in this audit environment. The passing unit suite is necessary but is not a substitute for those acceptance checks.
 
-## New run manifest
+## New run manifest recorded by the historical audit
 
 `protocol/run_manifest_v1.csv` contains 144 unique rows (48 per backbone).
 

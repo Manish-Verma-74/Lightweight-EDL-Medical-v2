@@ -1,70 +1,73 @@
-# Protocol v1 (written protocol; the machine-readable version is `configs/primary.yaml`)
+# Protocol v1 — Frozen primary experimental protocol
 
-Status: DRAFT until the freeze checklist at the end is complete and `protocol-v1` is tagged.
+**Status: FROZEN protocol decisions; release tag pending.** This written protocol and `configs/primary.yaml` describe the same frozen decisions. After committing the synchronized release files, create the `protocol-v1` Git tag on that exact commit before primary execution. Do not regenerate or edit the committed manifests during routine execution.
 
 ## Design
-3 backbones (EfficientNet-B0, MobileNetV3-Small, ShuffleNetV2 1.0x) x 4 frameworks (Softmax, EDL, R-EDL,
-F-EDL without spectral normalization) x 4 augmentations (Base (flips), Mixup, CutMix, RandAugment) x 3 training
-seeds (42, 123, 2024) = **144 runs**. The global run manifest (`protocol/run_manifest_v1.csv`) is immutable;
-workers filter it locally and never edit it.
 
-## Data
-- HAM10000, seven classes, direct resize to 224 x 224 (aspect ratio distorted; documented limitation), ImageNet normalization.
-- Split: `StratifiedGroupKFold(7, shuffle=True, random_state=42)`, groups = `lesion_id`, labels = `dx`,
-  scikit-learn 1.6.1. Train folds 0,1,2,5,6; validation fold 4; test fold 3. Generated once, hashed, committed.
-  Earlier reference counts (regression expectations only): 7,179 / 1,400 / 1,436 images, 10,015 images, 7,470 lesions.
-- HAM10000 is CC BY-NC 4.0: cite the dataset, never redistribute images.
-- Augmentation definition: horizontal/vertical flips (configured probability 0.5 each) are the common CPU-side baseline transforms for all four conditions. `base_flips` uses these alone; Mixup and CutMix add batch-level GPU mixing; RandAugment adds two operations at magnitude 9 after the shared flips. Resize/normalization are common to every condition.
+Three lightweight backbones (EfficientNet-B0, MobileNetV3-Small, ShuffleNetV2 1.0x) × four frameworks (Softmax, standard EDL, R-EDL, F-EDL without spectral normalization) × four augmentation conditions (Base flips, Mixup, CutMix, RandAugment) × three training seeds (42, 123, 2024) = **144 runs**. The global run manifest (`protocol/run_manifest_v1.csv`) is immutable. Each worker loads the same manifest and filters it locally by backbone; workers do not create per-worker copies of the manifest.
 
-## Training
-AdamW, lr 1e-4, weight decay 0.01, batch 32, no scheduler, FP32, training-only WeightedRandomSampler.
-Checkpoint = best validation macro-F1 (earliest epoch wins ties). Patience 8. Epoch cap
-E_max = max(best epochs of the five pilots) + 8 + 15, with the preregistered extension rule
-(+20 epochs for cap-limited runs, validation metrics only, up to an absolute ceiling set before training).
-Two persistent checkpoint roles per run: `best_checkpoint.pth`, `latest_resumable.pth`.
-KL annealing (EDL, R-EDL): min(1, epoch/10) with ONE-BASED epochs. Soft-target KL: alpha_tilde = alpha(1-t)+t.
-Training logs include per-epoch loss parts, global gradient-norm maximum, evidence/alpha and concentration maxima,
-non-finite detection, and F-EDL log-alpha clamp activation rate. F-EDL currently clamps raw log-alpha to [-20, 20]
-for numerical safety and uses mean batch reduction of the stated per-example objective; this is part of the frozen
-implementation and must be disclosed when comparing with implementations using other reduction conventions.
+## Data and preprocessing
 
-## Frameworks
-Softmax: q = softmax(z); native score 1 - max q.
-EDL: alpha = relu(z) + 1; q = alpha/S; native score K/S.
-R-EDL: alpha = relu(z) + lambda (lambda = 0.1); q = alpha/S; native score lambda*K/S (corrected uncertainty mass).
-F-EDL (no spectral norm): mu = (alpha + tau p)/(sum alpha + tau); native score = sum of class-wise variances;
-secondary 1 - sum mu^2.
-**Open before freeze:** verify the R-EDL objective and the F-EDL variance expression against the original papers/code.
-Anything that deviates is labelled a controlled adaptation in the thesis.
+- **HAM10000:** seven classes; RGB; direct resize to 224 × 224; ImageNet normalization. Direct resizing changes the original aspect ratio and is a documented limitation.
+- **Split:** `StratifiedGroupKFold(7, shuffle=True, random_state=42)`, grouped by `lesion_id`, stratified by `dx`, using scikit-learn 1.6.1. Train folds 0, 1, 2, 5, 6; validation fold 4; test fold 3. The committed split manifest and SHA-256 in `configs/primary.yaml` are authoritative. Reference counts are 7,179 / 1,400 / 1,436 images (10,015 total) and 7,470 lesions.
+- **Data integrity:** any missing, unreadable, duplicated, or mismatched record aborts processing. Do not silently drop records or regenerate the split during primary execution.
+- **Augmentations:** horizontal and vertical flips (probability 0.5 each) form the shared CPU-side baseline. `base_flips` uses the flips alone; Mixup and CutMix add GPU batch mixing; RandAugment adds two operations at magnitude 9 after the flips. Evaluation uses deterministic preprocessing without stochastic training augmentation.
+- HAM10000 is CC BY-NC 4.0. Cite the dataset and do not redistribute its images.
 
-## Metrics (see `edl/evaluation/metrics.py`)
-ECE 15 equal-width bins, right-inclusive; macro-cwECE; Brier (not divided by K); risk-coverage/AURC
-(stable order on ties); OOD AUROC/FPR95/AUPR with OOD positive, larger score = more OOD.
+## Training and checkpointing
 
-## Primary contrasts (preregistered)
-P1 CutMix - Base ECE per framework (98.75% intervals; directions: Softmax -, F-EDL -, EDL +, R-EDL +). Earlier
-project notes describe these directions as informed by validation-fold pilots; disclose this provenance and do not
-claim fully hypothesis-naive preregistration. The old pilot artifacts are not reused as primary evidence. P2 AUROC(F-EDL native) - AUROC(Softmax MSP) on PAD-UFES-20, Base augmentation (+).
-P4 CutMix - Base mean ECE degradation over 20 corrupted conditions (-). P3 efficiency is descriptive.
-10,000 bootstrap replicates per seed, RNG seed 20261009, lesion clusters (HAM10000), patient clusters (PAD-UFES-20).
-Seed variability and bootstrap uncertainty are reported separately. The secondary per-corruption curve intervals use 2,000 paired lesion-cluster bootstrap replicates (RNG seed 20261009); the preregistered P1/P2/P4 contrasts use 10,000.
+AdamW, learning rate 0.0001, weight decay 0.01, batch size 32, no scheduler, FP32, and a training-only `WeightedRandomSampler`. Checkpoints are selected by validation Macro-F1; the earliest epoch wins ties. Patience is 8 epochs. The initial global epoch cap is 57, determined as `max(best pilot epochs) + 8 + 15`. If a primary run reaches the cap before early stopping, the global cap can be extended by 20, only under the preregistered rule and never above the absolute resource ceiling of 100. All workers must use the same approved configuration/commit for any cap-only extension.
 
-## Freeze checklist
-- [ ] split manifest generated; hash in `configs/primary.yaml`
-- [ ] run manifest hash in `configs/primary.yaml`
-- [ ] PAD-UFES-20 and CIFAR-100 manifests hashed in the config
-- [ ] corruption severities inspected on the example grid, manifest hashed
-- [ ] R-EDL objective and F-EDL equations verified
-- [ ] CPU tests pass locally; smoke test and five-run pilot done; `training.max_epochs` and the absolute ceiling set
-- [ ] Drive sync cadence frozen from measured checkpoint-write time
-- [ ] commit, tag `protocol-v1`
+Each run has two persistent checkpoint roles: `best_checkpoint.pth` (selected model weights) and `latest_resumable.pth` (full resumable state). Checkpoints are written to local Colab storage, validated, copied to Drive using the safe persistence procedure, and accepted as persistent only after integrity checks succeed. The synchronization cadence is one epoch. Colab-local `/content/` storage is temporary; the successfully persisted Drive checkpoint is the recovery point.
 
-## Historical pilot provenance and limitations to disclose
-The new primary experiment starts from the new source tree and explicitly initialized ImageNet weights; no earlier
-project checkpoint, split, manifest, prediction, or result file is imported as primary evidence. Earlier project notes
-nevertheless say that the directional P1 hypotheses were informed by validation-fold pilots, and that some images in
-the current held-out partition were used in earlier pilot training under a previous split. Those facts must be disclosed;
-do not claim that the hypothesis origins were independent of all historical pilots or that the held-out images have never
-been seen in any earlier project. The new held-out partition remains untouched by the new primary training and model
-selection. Other limitations: direct-resize distortion; three training seeds; CIFAR-100 upsampling; PAD-UFES-20
-diagnostic overlap and domain shift; F-EDL without spectral normalization; lesion IDs (not patient IDs) for HAM10000.
+## Learning frameworks and documented implementation choices
+
+- **Softmax:** `q = softmax(z)`; native uncertainty is `1 - max(q)`.
+- **Standard EDL:** evidence is `relu(z)`, `alpha = evidence + 1`, `q = alpha / S`, and native uncertainty is `K / S`. The loss is the squared-error term plus the expected categorical variance term and one-based epoch annealed KL regularization. The KL soft-target rule is `alpha_tilde = alpha * (1 - t) + t`.
+- **R-EDL:** `alpha = relu(z) + lambda`, with `lambda = 0.1`; probabilities are `q = alpha / S`, and the native uncertainty mass uses the corrected `lambda * K / S` expression. The implemented objective uses the squared error between the soft target and predictive mean plus the annealed KL term; it does not add the standard EDL expected-variance term. The soft-target KL rule is `alpha_tilde = alpha * (1 - t) + t`, with one-based epoch annealing. This is the verified objective implementation used for this study; any differences in reduction/parameterization from another implementation must be reported as implementation choices, not presented as a new method.
+- **F-EDL without spectral normalization:** three independent heads produce positive `alpha = exp(clamp(g_alpha(z), -20, 20))`, `p = softmax(g_p(z))`, and `tau = softplus(g_tau(z))`. The predictive mean is `mu = (alpha + tau*p) / (sum(alpha) + tau)`. The class-wise variance is
+
+  `Var(pi_k) = mu_k*(1-mu_k)/(alpha_0 + tau + 1) + tau^2*p_k*(1-p_k)/((alpha_0 + tau)*(alpha_0 + tau + 1))`.
+
+  The native score is the sum of class-wise variances; the secondary score is `1 - sum(mu_k^2)`. The implemented loss is the batch mean of the per-example sum of `(y - mu)^2 + variance` plus the per-example sum of `(y - p)^2`. Spectral normalization is disabled. The log-alpha clamp `[-20, 20]` and batch-mean reduction are explicit implementation choices and must be disclosed when comparing to implementations with different settings.
+
+The equations and code paths above were checked against the selected reference formulations before freezing. This statement documents the implementation selected for this experiment; it does not claim that every optional setting of the reference repositories is reproduced.
+
+## Evaluation metrics
+
+For each ID split, report Accuracy, Macro-F1, class-wise recall/sensitivity, top-label ECE (15 equal-width bins), macro class-wise ECE, multiclass Brier score (mean per-image sum over classes, not divided by `K`), risk–coverage curves and AURC. The code records the selected epoch using validation Macro-F1 only. Melanoma operating thresholds are selected on validation predictions and applied to test predictions.
+
+For OOD evaluation, use HAM10000 test as ID, PAD-UFES-20 v1 as near/domain-shift OOD, and the official CIFAR-100 test split as far OOD. Report AUROC, FPR95, AUPR with OOD as positive and higher scores indicating greater OOD likelihood. PAD-UFES-20 has overlapping diagnostic classes and is interpreted as domain/acquisition shift, not pure semantic OOD. Upsampling 32 × 32 CIFAR-100 images to 224 × 224 may make far-OOD detection easier.
+
+Corruptions are applied after resize and conversion to float `[0,1]`, before clipping and ImageNet normalization. The four fixed families are Gaussian noise, Gaussian blur, brightness and contrast, with five severities each. The committed corruption manifest binds each test image and condition to deterministic generation settings and hashes. The 20 corrupted conditions are evaluated in addition to the clean reference.
+
+## Primary statistical contrasts
+
+- **P1:** CutMix minus Base ECE within framework; four co-primary contrasts use 98.75% intervals. Expected directions: Softmax negative, F-EDL negative, standard EDL positive, R-EDL positive.
+- **P2:** F-EDL native OOD score minus Softmax MSP uncertainty AUROC on PAD-UFES-20, using Base augmentation; expected direction positive.
+- **P3:** efficiency comparison is descriptive; no unregistered composite score.
+- **P4:** CutMix minus Base mean ECE degradation across the 20 corruption conditions; expected direction negative.
+
+Use 10,000 bootstrap replicates with RNG seed `20261009` for primary contrasts. Use lesion-cluster resampling for HAM10000, patient-cluster resampling for PAD-UFES-20 where identifiers are valid, and image-level resampling for CIFAR-100. Secondary per-corruption curve intervals use the configured 2,000 paired lesion-cluster bootstrap replicates. Report training-seed variability separately from bootstrap sampling uncertainty.
+
+## Freeze acceptance record
+
+The following gates were completed for the frozen release:
+
+- [x] Split manifest was generated from the selected HAM10000 source, semantically validated, hashed and committed.
+- [x] The 144-row global run manifest was validated, hashed and committed.
+- [x] PAD-UFES-20 v1 and CIFAR-100 manifests were generated, validated, hashed and committed.
+- [x] Corruption severities were reviewed using the example grid; the generated corruption manifest was validated, hashed and committed.
+- [x] The selected R-EDL objective and F-EDL equations/implementation choices were checked and documented above.
+- [x] Updated reporting code, evaluation scripts, and their test suite passed in the recorded Colab environment; smoke and five-run convergence pilot completed.
+- [x] The initial epoch cap is 57; patience is 8; the absolute resource ceiling and pilot resource ceiling are both 100.
+- [x] Drive checkpoint synchronization cadence is one epoch, selected after the smoke/transfer checks.
+The scientific and implementation freeze gates above are complete. As a release operation, commit and push this synchronized snapshot, then create and push `protocol-v1` on that exact commit before primary execution.
+
+Routine post-freeze sessions must verify the existing hashes and use the frozen tag. Do not rerun split/OOD/corruption manifest generators or alter the configuration in a routine worker session. A genuine scientific defect requires a documented protocol revision and consistent reruns of affected experiments.
+
+## Historical pilot provenance and limitations
+
+The new primary experiment starts from the v2 source tree and explicit ImageNet-pretrained weights; earlier checkpoints, split manifests, predictions, and result files are not imported as primary evidence. Earlier project notes nevertheless indicate that the directional P1 hypotheses were informed by validation-fold pilots and that some images in the current test partition appeared in earlier pilot training under a previous split. Disclose these facts; do not claim that the hypothesis origins were independent of all prior pilots or that the held-out images have never appeared in any earlier project. The new held-out partition remains untouched by v2 training and model selection.
+
+Other limitations: direct-resize aspect-ratio distortion; three training seeds; CIFAR-100 upsampling; PAD-UFES-20 diagnostic overlap/domain shift; F-EDL without spectral normalization; and lesion grouping (rather than patient grouping) for HAM10000.

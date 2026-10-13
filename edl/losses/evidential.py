@@ -1,3 +1,5 @@
+# Standard EDL objective finalized for protocol-v1.
+# See protocol/protocol_v1.md for the objective and KL annealing policy.
 """Softmax (soft-target), standard EDL and R-EDL losses.
 
 Targets may be integer labels [B] or soft targets [B, K] (Mixup / CutMix). Soft targets are
@@ -8,6 +10,7 @@ R-EDL : alpha = relu(output) + lambda ; loss = squared error on alpha/S + anneal
         (controlled adaptation: verify against the official R-EDL objective before freeze)
 KL    : KL(Dir(alpha_tilde) || Dir(1)) with alpha_tilde = alpha * (1 - t) + t
         (for EDL this equals the original evidence * (1 - t) + 1).
+
 """
 import torch
 import torch.nn.functional as F

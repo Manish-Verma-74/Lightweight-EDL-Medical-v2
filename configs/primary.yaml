@@ -140,7 +140,7 @@ corruption:
   global_seed: 20261009
   manifest: protocol/corruption_manifest.csv
   sha256: 19aa345452c8d889292a35ece254865bbf69c45115afad95fba5484ab424f217  
-  # Severity values are PROPOSED (ImageNet-C-inspired); inspect the example grid, then freeze.
+  # Frozen severity values; see protocol/protocol_v1.md for the corruption protocol.
   types:
     gaussian_noise:  {param: sigma,  severities: [0.08, 0.12, 0.18, 0.26, 0.38]}
     gaussian_blur:   {param: sigma,  severities: [1.0, 2.0, 3.0, 4.0, 6.0]}

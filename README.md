@@ -1,98 +1,85 @@
 # Lightweight-EDL-Medical-v2
 
-Code for the M.Tech thesis **"Calibration Robustness of Lightweight Evidential Deep Learning under Data Augmentation
-and Progressive Image Degradation in Medical Image Classification"** (HAM10000, with PAD-UFES-20 and CIFAR-100 as OOD sets).
+Code for the M.Tech thesis **"Calibration Robustness of Lightweight Evidential Deep Learning under Data Augmentation and Progressive Image Degradation in Medical Image Classification"**. The primary study uses HAM10000; PAD-UFES-20 and CIFAR-100 are used for OOD evaluation.
 
-An empirical comparison of 3 lightweight backbones x 4 uncertainty frameworks x 4 augmentations x 3 seeds = **144 runs**.
-The experimental decisions are written in `protocol/protocol_v1.md` and, machine-readably, in `configs/primary.yaml`.
+The primary matrix is 3 lightweight backbones × 4 uncertainty frameworks × 4 augmentation conditions × 3 seeds = **144 runs**. The research decisions are frozen in `protocol/protocol_v1.md` and `configs/primary.yaml`; create and verify the `protocol-v1` tag after committing this synchronized release snapshot and before primary execution.
 
-## Workflow
+## Workflow and roles
+
 | Tool | Used for |
 |---|---|
-| VS Code (`D:\Thesis\Lightweight-EDL-Medical-v2`) | all code edits and local CPU tests |
-| GitHub Desktop | review, commit, push (never commit data, checkpoints or tokens) |
-| GitHub | authoritative code; the primary study runs from the tag `protocol-v1` |
-| Google Colab | training and evaluation only; `notebooks/colab_runner.ipynb` clones the tag every session |
-| Google Drive | per-run results (`<DRIVE_ROOT>/<phase>/runs/<run_id>/`), worker logs, protocol artifacts |
+| VS Code (`D:\Thesis\Lightweight-EDL-Medical-v2`) | Editing/reviewing source, YAML and Markdown. Local Python execution is not required for the user's workflow. |
+| GitHub Desktop | Review diffs, commit and push code/protocol changes; never commit credentials, raw datasets or checkpoints. |
+| GitHub | Authoritative source history and frozen release tag `protocol-v1`. |
+| Google Colab | Environment checks, pytest, training, evaluation and analysis. Each new worker session checks out the same frozen tag. |
+| Google Drive | Persistent manifests/artifact backups, run checkpoints, run summaries and isolated worker logs. |
 
-Keep the Git clone **outside** any Drive-synced folder. Images are read from Colab local disk (`/content/data`), never from Drive.
+Keep the Git clone in Colab outside Drive-synchronized folders. Read raw images from Colab local storage (`/content/data`), never directly from mounted Drive.
 
-## Layout
+## Repository layout
+
+```text
+configs/primary.yaml       frozen machine-readable protocol
+protocol/                  written protocol and committed manifests
+edl/                       data, model, loss, training and evaluation packages
+scripts/                   reproducible command-line entry points
+tests/                     automated tests
+notebooks/colab_runner.ipynb Colab setup and worker workflow
+environment/               recorded Colab environment
 ```
-configs/primary.yaml      all settings (validated at load; unresolved fields are TO_FILL_...)
-protocol/                 written protocol; frozen manifests are committed here
-edl/                      package: data/, models/, losses/, training/, evaluation/, augment.py, frameworks.py
-scripts/                  command-line entry points (see below)
-tests/                    pytest suite
-notebooks/colab_runner.ipynb
-environment/              recorded Colab versions
-```
 
-## One-time setup (in this order)
-1. **Local environment** (outside Drive): `python -m venv .venv`, `pip install -r requirements-dev.txt`, then CPU torch:
-   `pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu`. Run `python -m pytest`.
-   Tests that need PyTorch are skipped when it is not installed, so install it before trusting the result.
-2. **Global run manifest**: the clean repository includes a newly generated `protocol/run_manifest_v1.csv` with exactly
-   144 unique factorial rows and its verified SHA-256 in `configs/primary.yaml`. Check it with
-   `python scripts/make_run_manifest.py --check`; do not regenerate or hand-edit it after the protocol snapshot is frozen.
-3. **Colab**: run cells 1-5 of the notebook, then `scripts/make_split.py` (cell 6a). It prints the split SHA-256 and checks it
-   against the earlier verified reference. Put the hash in `data.split.sha256`, commit `protocol/split_manifest_v1.csv` (download it
-   from `<DRIVE_ROOT>/protocol_artifacts/`), push, re-clone, run `scripts/verify_data.py`.
-4. **OOD and corruption manifests** (cells 6c-6d): record their hashes in the config, inspect `corruption_example_grid.png`,
-   and change the proposed severities in the config if they look wrong *before* freezing.
-5. **Smoke test, then the five-run pilot** (cells 7a-7b). `scripts/pilot_report.py` prints the extension decision and
-   `E_max = max(best epochs) + 8 + 15`. Put `training.max_epochs` and `training.absolute_epoch_ceiling` in the config.
-6. **Freeze**: finish the checklist in `protocol/protocol_v1.md`, commit, tag `protocol-v1`, push the tag.
-7. **Primary runs** (cell 8 on each worker). After all workers finish, run `scripts/evaluate_runs.py` on each assigned backbone/worker
-   (the default evaluates ID, PAD-UFES-20, CIFAR-100, and the selected corruption subset), then run
-   `scripts/analyze_stats.py`, `scripts/plot_results.py`, `scripts/run_efficiency.py`, and finally
-   `scripts/aggregate_results.py --require-evaluation` from one worker.
+## Frozen release: routine new-session workflow
 
-## Running on several Colab workers
-Every worker clones the same tag and loads the **same** 144-row run manifest, then filters it locally:
-```
+The repository contains a frozen protocol and committed manifests. Do **not** rerun manifest-generation commands during routine primary worker sessions.
+
+1. In Colab, mount the shared Drive and clone the repository outside Drive. Check out the exact tag with `git fetch origin --tags` and `git checkout protocol-v1`.
+2. Install the pinned dependencies, verify the recorded Python/Torch/torchvision/scikit-learn versions and T4 GPU, and run `python -m pytest -q`.
+3. Download or reuse datasets on the Colab local disk. After a runtime reset, HAM10000 is downloaded to `/content/data/ham10000`; PAD-UFES-20 and CIFAR-100 only need to be downloaded/extracted for OOD evaluation sessions. Verify the datasets against the committed manifests.
+4. Run `python scripts/make_run_manifest.py --check` to check the global run manifest. Run `scripts/verify_data.py` to validate HAM10000 against the committed split manifest. These are checks only; they must not regenerate or change the manifests.
+5. Run the assigned primary worker command below. All workers use the same `protocol-v1` tag, `configs/primary.yaml`, split manifest, global 144-row run manifest and shared Drive root. Only the local backbone filter and worker-log name differ. Do not supply different primary `--max-epochs` overrides.
+6. After all 144 runs have reached valid terminal states, run post-training evaluation on each assigned backbone, then the statistical, plotting and efficiency scripts, and finally `scripts/aggregate_results.py --require-evaluation` once all required artifacts are present.
+
+## One-time pre-freeze commands (historical workflow only)
+
+The following commands document how the frozen artifacts were created. They are **not** part of normal execution after the `protocol-v1` tag exists:
+
+- `scripts/make_split.py`: generate a new grouped HAM10000 split only when intentionally creating a new protocol version.
+- `scripts/make_ood_manifests.py`: select and hash PAD-UFES-20/CIFAR-100 files for a new protocol version.
+- `scripts/make_corruption_manifest.py`: generate and hash the corruption conditions for a new protocol version.
+- Smoke tests and the five-run convergence pilot establish implementation acceptance and the initial cap for a new protocol version. Do not rerun them as routine steps for the frozen `protocol-v1` primary matrix.
+
+A real scientific defect that requires changing training/evaluation behavior must be handled as a versioned protocol revision with consistent reruns of affected experiments. Do not silently regenerate manifests, replace failed runs with new seeds, or change hypotheses after observing test results.
+
+## Three-worker Colab execution
+
+Each worker loads the same global 144-row manifest and filters it locally; do not create separate per-worker manifests:
+
+```bash
 python scripts/run_experiments.py --phase primary --backbone efficientnet_b0   --worker-tag efficientnet --require-gpu T4
 python scripts/run_experiments.py --phase primary --backbone mobilenet_v3_small --worker-tag mobilenet    --require-gpu T4
 python scripts/run_experiments.py --phase primary --backbone shufflenet_v2      --worker-tag shufflenet   --require-gpu T4
 ```
-Each run writes only to its own folder (`runs/<run_id>/`); each worker writes only to its own log
-(`worker_logs/logs_<tag>_<phase>.csv`). Nothing shared is ever written by two processes. `scripts/aggregate_results.py` builds
-`final_factorial_v1.csv` from the per-run files and cross-checks the worker logs. `--shard i/n` is available if you prefer to
-balance the load by runs instead of by backbone. Run `--require-gpu T4` on every worker so all runs use the same GPU model.
-Whether Google permits using several accounts this way is your responsibility to check against the Colab terms.
-If the primary extension rule triggers, commit only the approved `training.max_epochs` increase (never change `absolute_epoch_ceiling`) and ensure all workers check out that exact same commit/ref before resuming. Keep the original `protocol-v1` tag immutable; record the cap-extension commit or a descriptive tag such as `protocol-v1-cap-extension-1` in the run records. The code permits this cap-only resume because the cap alone is excluded from the config identity hash and the training-source fingerprint must match.
 
-## Rules enforced by the code
-- the split and run manifests are loaded only after their SHA-256 matches the config (line endings normalized); no script regenerates the split
-- missing or unreadable images abort; nothing is silently dropped
-- training, smoke tests and pilots never read the held-out test partition; test predictions are only exported by `scripts/evaluate_runs.py` after the primary study is frozen and training is complete
-- checkpoint = best validation macro-F1 (earliest epoch wins ties); only `best_checkpoint.pth` and `latest_resumable.pth` per run
-- checkpoints are written locally, validated, copied to Drive under a temporary name, hash-checked and renamed; resume uses only copies listed in `persist_index.json`
-- resume is refused if the run, config, split, phase or training-source fingerprint differs; a config-only commit made by the preregistered epoch-cap extension rule is allowed only when the training-source fingerprint and all non-cap settings match
-- a failed run is recorded and the same run is resumed later; seeds are never swapped
-- CSV logs with a different header are an error, never a silent new file
+Each run writes to its own run directory; each worker writes to its own `worker_logs/logs_<tag>_<phase>.csv`. The aggregate script cross-checks run artifacts and worker logs. Use `--require-gpu T4` on every worker so benchmark/training hardware is consistent. Users are responsible for ensuring that their multi-account Colab usage follows applicable Colab terms.
+
+The initial cap is 57 epochs, with patience 8 and an absolute resource ceiling of 100. If the preregistered primary extension rule triggers, commit only the approved cap increase without changing the absolute ceiling or any other protocol settings; all workers must use the same approved commit/reference. Keep `protocol-v1` immutable, and record any approved extension as a distinct commit or tag. The code permits cap-only resume only when the training-source fingerprint and all non-cap settings still match.
+
+## Safeguards enforced by the code
+
+- Frozen manifest hashes are checked before use; split assignments are not regenerated by training/evaluation.
+- Missing/unreadable images and metadata mismatches are fatal rather than silently filtered.
+- Smoke, pilot and training phases do not evaluate the held-out test set. Test predictions are exported only by the post-training evaluation workflow after the full primary matrix is eligible.
+- Checkpoint selection uses validation Macro-F1, with the earliest epoch winning ties. Only `best_checkpoint.pth` and `latest_resumable.pth` are persistent checkpoint roles per run.
+- Checkpoints are saved locally, validated, safely copied to Drive and checked against the persistence index before being treated as recoverable.
+- Resume checks run/config/split/phase identity and the training-source fingerprint.
+- A failed run is resumed with the same run identity and seed; seeds are never swapped.
+- Worker-log schemas must match; duplicate or inconsistent records are rejected.
+- Final test/OOD/corruption/efficiency results must be regenerated from saved predictions and frozen scripts; no composite winner is invented.
 
 ## Audit and repair record
-`CODE_AUDIT_AND_REPAIR_REPORT.md` maps the 20-item consolidated review to the actual fixes, explains the items where the proposed edit was not scientifically safe, and lists the remaining data-dependent protocol-freeze gates.
 
-## What is tested where
-`python -m pytest` runs: config, split, metrics, statistics (weighted ECE/AUROC against references), operating points,
-corruption, manifests, OOD manifests (these need no PyTorch). With PyTorch installed it also runs the loss tests
-(numpy reference values), 12 backbone/framework forward-backward tests including Mixup/CutMix targets, augmentation tests,
-checkpoint/persistence tests and end-to-end CPU tests of training, resume and the runner on a tiny synthetic dataset.
-
-## Open items (resolve before the freeze)
-- verify the R-EDL objective and the F-EDL variance expression against the original papers/code (`objective_status` in the config); the freeze gate intentionally rejects the current unresolved status strings
-- review the proposed corruption severity values; record the corruption, PAD-UFES-20 and CIFAR-100 manifest hashes
-- set `training.max_epochs` and `training.absolute_epoch_ceiling`; freeze `checkpoint.sync_every_n_epochs` after measuring Drive write time
-- PAD-UFES-20 loading assumes the original Mendeley layout (`metadata.csv` with `patient_id, lesion_id, img_id, diagnostic`);
-  the manifest builder fails loudly if the columns differ
+`CODE_AUDIT_AND_REPAIR_REPORT.md` is retained as a historical report for an earlier archive. Its old statements about a draft configuration or outstanding pre-freeze gates describe the state at that time and are **superseded by the current frozen `protocol-v1` release**. The current authority is the tagged source snapshot, `configs/primary.yaml`, and `protocol/protocol_v1.md`.
 
 ## Data and licences
-HAM10000 (CC BY-NC 4.0): cite the dataset paper and do not redistribute the images. PAD-UFES-20 and CIFAR-100: cite and follow their terms.
-Code: MIT (see `LICENSE`; confirm with your institute).
 
-
-### Supplemental evaluation safeguards
-
-The ID prediction export validates its saved bundle before accepting metrics. Selective specificity is calculated on retained samples only. Corruption aggregation excludes the `clean:0` reference and requires exactly 20 corrupted conditions per run. OOD evaluation also reports the F-EDL `1 - sum(mu_k^2)` secondary score when present in both ID and OOD bundles.
+HAM10000 (CC BY-NC 4.0): cite the dataset paper and do not redistribute images. PAD-UFES-20 and CIFAR-100: cite and follow their dataset terms. Code licence: MIT (`LICENSE`); confirm institute requirements.
