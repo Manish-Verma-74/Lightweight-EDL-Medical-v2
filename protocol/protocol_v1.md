@@ -1,6 +1,6 @@
 # Protocol v1 — Frozen primary experimental protocol
 
-**Status: FROZEN protocol decisions; release tag pending.** This written protocol and `configs/primary.yaml` describe the same frozen decisions. After committing the synchronized release files, create the `protocol-v1` Git tag on that exact commit before primary execution. Do not regenerate or edit the committed manifests during routine execution.
+**Status: FROZEN protocol decisions; release tag now done.** This written protocol and `configs/primary.yaml` describe the same frozen decisions. After committing the synchronized release files, create the `protocol-v1` Git tag on that exact commit before primary execution. Do not regenerate or edit the committed manifests during routine execution.
 
 ## Design
 
